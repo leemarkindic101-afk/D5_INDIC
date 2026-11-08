@@ -88,14 +88,13 @@ public class DatabaseInitializer {
             FOREIGN KEY (approved_by)      REFERENCES users(id)
         )""",
         """
-        CREATE TABLE IF NOT EXISTS activity_log (
-            log_id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       INTEGER,
-            action        TEXT NOT NULL,
-            target_table  TEXT,
-            record_id     INTEGER,
-            log_timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
+        CREATE TABLE IF NOT EXISTS activity_logs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            timestamp   DATETIME DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )"""
     };
 

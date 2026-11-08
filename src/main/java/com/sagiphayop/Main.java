@@ -1,7 +1,10 @@
 package com.sagiphayop;
 
+import com.sagiphayop.dao.ActivityLogDao;
+import com.sagiphayop.dao.AnimalDao;
 import com.sagiphayop.dao.DatabaseInitializer;
 import com.sagiphayop.dao.UserDao;
+import com.sagiphayop.dao.VaccinationDao;
 import com.sagiphayop.ui.Authentication;
 
 import java.util.Scanner;
@@ -12,8 +15,12 @@ public class Main {
         DatabaseInitializer.initialize();
 
         UserDao userDao = new UserDao();
+        ActivityLogDao activityLogDao = new ActivityLogDao();
+        AnimalDao animalDao = new AnimalDao();
+        VaccinationDao vaccinationDao = new VaccinationDao();
+
         try (Scanner scanner = new Scanner(System.in)) {
-            new Authentication(userDao, scanner).start();
+            new Authentication(userDao, activityLogDao, animalDao, vaccinationDao, scanner).start();
         }
     }
 }

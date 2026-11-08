@@ -1,6 +1,9 @@
 package com.sagiphayop.ui;
 
+import com.sagiphayop.dao.ActivityLogDao;
+import com.sagiphayop.dao.AnimalDao;
 import com.sagiphayop.dao.UserDao;
+import com.sagiphayop.dao.VaccinationDao;
 import com.sagiphayop.model.User;
 
 import java.util.Optional;
@@ -9,10 +12,17 @@ import java.util.Scanner;
 /** Handles login, registration, and role-based routing. Contains no SQL. */
 public class Authentication {
     private final UserDao userDao;
+    private final ActivityLogDao activityLogDao;
+    private final AnimalDao animalDao;
+    private final VaccinationDao vaccinationDao;
     private final Scanner scanner;
 
-    public Authentication(UserDao userDao, Scanner scanner) {
+    public Authentication(UserDao userDao, ActivityLogDao activityLogDao, AnimalDao animalDao,
+                          VaccinationDao vaccinationDao, Scanner scanner) {
         this.userDao = userDao;
+        this.activityLogDao = activityLogDao;
+        this.animalDao = animalDao;
+        this.vaccinationDao = vaccinationDao;
         this.scanner = scanner;
     }
 
@@ -103,13 +113,22 @@ public class Authentication {
             return;
         }
         System.out.println("Welcome, " + user.username() + " (" + user.role() + ")!");
+        activityLogDao.logAction(user.id(), "LOGIN",
+                "User " + user.username() + " (ID: " + user.id() + ") logged in.");
         routeToMenu(user);
+        logout(user);
+    }
+
+    /** Called when a role menu returns, i.e. the user chose Logout. */
+    private void logout(User user) {
+        activityLogDao.logAction(user.id(), "LOGOUT",
+                "User " + user.username() + " (ID: " + user.id() + ") logged out.");
     }
 
     private void routeToMenu(User user) {
         switch (user.role()) {
-            case "ADMIN" -> new AdminMenu(userDao, scanner, user).show();
-            case "VET_TECHNICIAN" -> new VetTechnicianMenu(scanner, user).show();
+            case "ADMIN" -> new AdminMenu(userDao, activityLogDao, scanner, user).show();
+            case "VET_TECHNICIAN" -> new VetTechnicianMenu(animalDao, vaccinationDao, activityLogDao, scanner, user).show();
             case "PET_OWNER" -> new PetOwnerMenu(scanner, user).show();
             default -> System.out.println("Unknown role: " + user.role());
         }
