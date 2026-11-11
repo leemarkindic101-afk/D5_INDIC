@@ -1,29 +1,17 @@
 package com.sagiphayop.ui;
 
-import com.sagiphayop.dao.ActivityLogDao;
-import com.sagiphayop.dao.AnimalDao;
-import com.sagiphayop.dao.UserDao;
-import com.sagiphayop.dao.VaccinationDao;
 import com.sagiphayop.model.User;
+import com.sagiphayop.util.InputUtil;
+import com.sagiphayop.util.Lookups;
 
 import java.util.Optional;
-import java.util.Scanner;
 
 /** Handles login, registration, and role-based routing. Contains no SQL. */
 public class Authentication {
-    private final UserDao userDao;
-    private final ActivityLogDao activityLogDao;
-    private final AnimalDao animalDao;
-    private final VaccinationDao vaccinationDao;
-    private final Scanner scanner;
+    private final AppContext ctx;
 
-    public Authentication(UserDao userDao, ActivityLogDao activityLogDao, AnimalDao animalDao,
-                          VaccinationDao vaccinationDao, Scanner scanner) {
-        this.userDao = userDao;
-        this.activityLogDao = activityLogDao;
-        this.animalDao = animalDao;
-        this.vaccinationDao = vaccinationDao;
-        this.scanner = scanner;
+    public Authentication(AppContext ctx) {
+        this.ctx = ctx;
     }
 
     public void start() {
@@ -33,8 +21,7 @@ public class Authentication {
             System.out.println("1. Login");
             System.out.println("2. Register");
             System.out.println("0. Exit");
-            System.out.print("Choose: ");
-            switch (scanner.nextLine().trim()) {
+            switch (InputUtil.readLine(ctx.scanner(), "Choose: ")) {
                 case "1" -> login();
                 case "2" -> register();
                 case "0" -> {
@@ -48,18 +35,16 @@ public class Authentication {
 
     private void register() {
         System.out.println("\n--- Register New Account ---");
-        System.out.print("Username: ");
-        String username = scanner.nextLine().trim();
-        if (username.isEmpty() || username.contains(" ")) {
-            System.out.println("Username cannot be empty or contain spaces.");
+        String username = InputUtil.readLine(ctx.scanner(), "Username: ");
+        if (!Lookups.USERNAME.matcher(username).matches()) {
+            System.out.println(Lookups.USERNAME_RULE);
             return;
         }
-        if (userDao.usernameExists(username)) {
+        if (ctx.userDao().usernameExists(username)) {
             System.out.println("That username is already taken.");
             return;
         }
-        System.out.print("Password (min 6 characters): ");
-        String password = scanner.nextLine();
+        String password = InputUtil.readLine(ctx.scanner(), "Password (min 6 characters): ");
         if (password.length() < 6) {
             System.out.println("Password is too short.");
             return;
@@ -69,7 +54,7 @@ public class Authentication {
             System.out.println("Registration cancelled.");
             return;
         }
-        if (userDao.registerUser(username, password, role)) {
+        if (ctx.userDao().registerUser(username, password, role)) {
             System.out.println("Registration successful! Your account is PENDING admin approval.");
         } else {
             System.out.println("Registration failed. Please try again.");
@@ -84,11 +69,10 @@ public class Authentication {
             System.out.println("2. VET_TECHNICIAN");
             System.out.println("3. PET_OWNER");
             System.out.println("0. Cancel");
-            System.out.print("Choose: ");
-            switch (scanner.nextLine().trim()) {
-                case "1": return "ADMIN";
-                case "2": return "VET_TECHNICIAN";
-                case "3": return "PET_OWNER";
+            switch (InputUtil.readLine(ctx.scanner(), "Choose: ")) {
+                case "1": return Lookups.ROLES.get(0);
+                case "2": return Lookups.ROLES.get(1);
+                case "3": return Lookups.ROLES.get(2);
                 case "0": return null;
                 default: System.out.println("Invalid choice. Please enter 1-3, or 0 to cancel.");
             }
@@ -97,12 +81,11 @@ public class Authentication {
 
     private void login() {
         System.out.println("\n--- Login ---");
-        System.out.print("Username: ");
-        String username = scanner.nextLine().trim();
+        String username = InputUtil.readLine(ctx.scanner(), "Username: ");
         System.out.print("Password: ");
-        String password = scanner.nextLine();
+        String password = ctx.scanner().nextLine();
 
-        Optional<User> result = userDao.authenticate(username, password);
+        Optional<User> result = ctx.userDao().authenticate(username, password);
         if (result.isEmpty()) {
             System.out.println("Invalid username or password.");
             return;
@@ -113,7 +96,7 @@ public class Authentication {
             return;
         }
         System.out.println("Welcome, " + user.username() + " (" + user.role() + ")!");
-        activityLogDao.logAction(user.id(), "LOGIN",
+        ctx.activityLogDao().logAction(user.id(), "LOGIN",
                 "User " + user.username() + " (ID: " + user.id() + ") logged in.");
         routeToMenu(user);
         logout(user);
@@ -121,15 +104,17 @@ public class Authentication {
 
     /** Called when a role menu returns, i.e. the user chose Logout. */
     private void logout(User user) {
-        activityLogDao.logAction(user.id(), "LOGOUT",
+        System.out.println("Logged out.");
+        ctx.activityLogDao().logAction(user.id(), "LOGOUT",
                 "User " + user.username() + " (ID: " + user.id() + ") logged out.");
     }
 
     private void routeToMenu(User user) {
         switch (user.role()) {
-            case "ADMIN" -> new AdminMenu(userDao, activityLogDao, scanner, user).show();
-            case "VET_TECHNICIAN" -> new VetTechnicianMenu(animalDao, vaccinationDao, activityLogDao, scanner, user).show();
-            case "PET_OWNER" -> new PetOwnerMenu(scanner, user).show();
+            case "ADMIN" -> new AdminMenu(ctx, user).show();
+            case "VET_TECHNICIAN" -> new RecordsMenu(ctx, user,
+                    "VET TECHNICIAN MENU (" + user.username() + ")", "Logout").show();
+            case "PET_OWNER" -> new PetOwnerMenu(ctx, user).show();
             default -> System.out.println("Unknown role: " + user.role());
         }
     }

@@ -1,31 +1,30 @@
 package com.sagiphayop.ui;
 
-import com.sagiphayop.dao.ActivityLogDao;
-import com.sagiphayop.dao.UserDao;
 import com.sagiphayop.model.ActivityLog;
+import com.sagiphayop.model.Owner;
 import com.sagiphayop.model.User;
+import com.sagiphayop.util.InputUtil;
+import com.sagiphayop.util.Lookups;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Scanner;
 
-/** Admin console. Uses DAOs for all data access; no SQL here. */
+/** Admin console: accounts, audit logs, and access to all operational records. No SQL here. */
 public class AdminMenu {
-    private static final List<String> VALID_ROLES = List.of("ADMIN", "VET_TECHNICIAN", "PET_OWNER");
-    private static final List<String> VALID_STATUSES = List.of("APPROVED", "PENDING");
     private static final int DESC_WIDTH = 35;
 
-    private final UserDao userDao;
-    private final ActivityLogDao activityLogDao;
+    private final AppContext ctx;
     private final Scanner scanner;
     private final User currentAdmin;
+    private final OwnerScreens ownerScreens;
 
-    public AdminMenu(UserDao userDao, ActivityLogDao activityLogDao, Scanner scanner, User currentAdmin) {
-        this.userDao = userDao;
-        this.activityLogDao = activityLogDao;
-        this.scanner = scanner;
+    public AdminMenu(AppContext ctx, User currentAdmin) {
+        this.ctx = ctx;
+        this.scanner = ctx.scanner();
         this.currentAdmin = currentAdmin;
+        this.ownerScreens = new OwnerScreens(ctx, currentAdmin);
     }
 
     public void show() {
@@ -36,26 +35,29 @@ public class AdminMenu {
             System.out.println("2. View Pending Registrations");
             System.out.println("3. Approve User Account");
             System.out.println("4. Update User Role and Status");
-            System.out.println("5. View System Audit Logs");
+            System.out.println("5. Create Staff / Pet Owner Account");
+            System.out.println("6. Owners, Animals, Vaccinations & Rescues");
+            System.out.println("7. View System Audit Logs");
             System.out.println("0. Logout");
-            int choice = readIntInput("Choose: ");
+            int choice = InputUtil.readInt(scanner, "Choose: ");
             switch (choice) {
-                case 1 -> printUserTable(userDao.getAllUsers());
+                case 1 -> printUserTable(ctx.userDao().getAllUsers());
                 case 2 -> viewPending();
                 case 3 -> approveUser();
                 case 4 -> updateUser();
-                case 5 -> auditLogMenu();
-                case 0 -> {
-                    System.out.println("Logged out.");
-                    running = false;
-                }
-                default -> System.out.println("Invalid choice. Please select 0-5.");
+                case 5 -> createAccount();
+                case 6 -> new RecordsMenu(ctx, currentAdmin, "RECORDS MANAGEMENT", "Back").show();
+                case 7 -> auditLogMenu();
+                case 0 -> running = false;
+                default -> System.out.println("Invalid choice. Please select 0-7.");
             }
         }
     }
 
+    // ---------- Account management ----------
+
     private void viewPending() {
-        List<User> pending = userDao.getPendingUsers();
+        List<User> pending = ctx.userDao().getPendingUsers();
         if (pending.isEmpty()) {
             System.out.println("No pending registrations.");
         } else {
@@ -64,14 +66,14 @@ public class AdminMenu {
     }
 
     private void approveUser() {
-        List<User> pending = userDao.getPendingUsers();
+        List<User> pending = ctx.userDao().getPendingUsers();
         if (pending.isEmpty()) {
             System.out.println("No pending registrations.");
             return;
         }
         printUserTable(pending);
         while (true) {
-            int targetId = readIntInput("Enter User ID to approve (0 to cancel): ");
+            int targetId = InputUtil.readInt(scanner, "Enter User ID to approve (0 to cancel): ");
             if (targetId == 0) {
                 System.out.println("Approval cancelled.");
                 return;
@@ -81,9 +83,9 @@ public class AdminMenu {
                 System.out.println("User ID " + targetId + " is not in the pending list. Try again.");
                 continue;
             }
-            if (userDao.approveUser(targetId)) {
+            if (ctx.userDao().approveUser(targetId)) {
                 System.out.println("SUCCESS: User ID " + targetId + " has been APPROVED.");
-                activityLogDao.logAction(currentAdmin.id(), "USER_APPROVED",
+                ctx.activityLogDao().logAction(currentAdmin.id(), "USER_APPROVED",
                         "Admin " + currentAdmin.id() + " approved account for User ID " + targetId);
             } else {
                 System.out.println("Approval failed. Please try again.");
@@ -93,10 +95,10 @@ public class AdminMenu {
     }
 
     private void updateUser() {
-        List<User> all = userDao.getAllUsers();
+        List<User> all = ctx.userDao().getAllUsers();
         printUserTable(all);
         while (true) {
-            int targetId = readIntInput("Enter User ID to update (0 to cancel): ");
+            int targetId = InputUtil.readInt(scanner, "Enter User ID to update (0 to cancel): ");
             if (targetId == 0) {
                 System.out.println("Update cancelled.");
                 return;
@@ -110,21 +112,23 @@ public class AdminMenu {
                 System.out.println("User ID " + targetId + " does not exist. Try again.");
                 continue;
             }
-            String newRole = readValidRole();
+            String newRole = InputUtil.readChoice(scanner,
+                    "Enter new role " + Lookups.ROLES + " (0 to cancel): ", Lookups.ROLES, null);
             if (newRole == null) {
                 System.out.println("Update cancelled.");
                 return;
             }
-            String newStatus = readValidStatus();
+            String newStatus = InputUtil.readChoice(scanner,
+                    "Enter new status " + Lookups.USER_STATUSES + " (0 to cancel): ", Lookups.USER_STATUSES, null);
             if (newStatus == null) {
                 System.out.println("Update cancelled.");
                 return;
             }
             User old = target.get();
-            if (userDao.updateUserRoleAndStatus(targetId, newRole, newStatus)) {
+            if (ctx.userDao().updateUserRoleAndStatus(targetId, newRole, newStatus)) {
                 System.out.println("SUCCESS: User ID " + targetId + " updated to role "
                         + newRole + " with status " + newStatus + ".");
-                activityLogDao.logAction(currentAdmin.id(), "USER_UPDATED",
+                ctx.activityLogDao().logAction(currentAdmin.id(), "USER_UPDATED",
                         "Admin " + currentAdmin.id() + " changed User " + targetId + " ("
                                 + old.username() + ") role " + old.role() + " -> " + newRole
                                 + ", status " + old.status() + " -> " + newStatus);
@@ -132,6 +136,83 @@ public class AdminMenu {
                 System.out.println("Update failed. Please try again.");
             }
             return;
+        }
+    }
+
+    /** CREATE feature 5: the admin creates an account with an assigned role; it is APPROVED at once. */
+    private void createAccount() {
+        System.out.println("\n--- Create Account ---");
+        String username;
+        while (true) {
+            username = InputUtil.readLine(scanner, "Username (0 to cancel): ");
+            if (username.equals("0")) {
+                System.out.println("Cancelled.");
+                return;
+            }
+            if (!Lookups.USERNAME.matcher(username).matches()) {
+                System.out.println(Lookups.USERNAME_RULE);
+            } else if (ctx.userDao().usernameExists(username)) {
+                System.out.println("That username is already taken.");
+            } else {
+                break;
+            }
+        }
+        String password;
+        while (true) {
+            password = InputUtil.readLine(scanner, "Password (min 6 characters, 0 to cancel): ");
+            if (password.equals("0")) {
+                System.out.println("Cancelled.");
+                return;
+            }
+            if (password.length() < 6) {
+                System.out.println("Password is too short.");
+            } else if (!password.equals(InputUtil.readLine(scanner, "Confirm password: "))) {
+                System.out.println("Passwords do not match.");
+            } else {
+                break;
+            }
+        }
+        String role = InputUtil.readChoice(scanner, "Role " + Lookups.ROLES + " (0 to cancel): ",
+                Lookups.ROLES, null);
+        if (role == null) {
+            System.out.println("Cancelled.");
+            return;
+        }
+        int newId = ctx.userDao().createApprovedUser(username, password, role);
+        if (newId < 0) {
+            System.out.println("Could not create the account. Please try again.");
+            return;
+        }
+        System.out.println("SUCCESS: Account '" + username + "' (User ID " + newId + ") created as "
+                + role + " and APPROVED.");
+        ctx.activityLogDao().logAction(currentAdmin.id(), "USER_CREATED",
+                "Admin " + currentAdmin.id() + " created " + role + " account '" + username
+                        + "' (User ID " + newId + ")");
+        if (role.equals("PET_OWNER")) {
+            offerOwnerLink(newId, username);
+        }
+    }
+
+    /** A new PET_OWNER login is useless without an owner record, so offer to connect one now. */
+    private void offerOwnerLink(int newUserId, String username) {
+        if (!InputUtil.confirm(scanner, "Link '" + username + "' to a pet owner record now?")) {
+            System.out.println("Skipped. The owner can create their own profile after logging in.");
+            return;
+        }
+        List<Owner> unlinked = ctx.ownerDao().getAll().stream().filter(o -> o.userId() == null).toList();
+        System.out.println("Choose an existing owner without a login (N registers a new one linked to this account):");
+        Owner owner = ownerScreens.pick("Owner", unlinked, Owner::id, Tables::owners,
+                (o, kw) -> o.fullName().toLowerCase().contains(kw.toLowerCase()),
+                () -> ownerScreens.registerOwner(newUserId));
+        if (owner == null) {
+            return;
+        }
+        if (owner.userId() != null || ctx.ownerDao().linkUser(owner.id(), newUserId)) {
+            System.out.println("Owner #" + owner.id() + " (" + owner.fullName() + ") is linked to '" + username + "'.");
+            ctx.activityLogDao().logAction(currentAdmin.id(), "OWNER_LINKED",
+                    "Linked Owner #" + owner.id() + " (" + owner.fullName() + ") to User ID " + newUserId);
+        } else {
+            System.out.println("Could not link the owner record.");
         }
     }
 
@@ -144,7 +225,7 @@ public class AdminMenu {
             System.out.println("2. Filter Logs by User ID");
             System.out.println("3. Clear All Logs");
             System.out.println("0. Back");
-            int choice = readIntInput("Choose: ");
+            int choice = InputUtil.readInt(scanner, "Choose: ");
             switch (choice) {
                 case 1 -> viewAllLogs();
                 case 2 -> filterLogsByUser();
@@ -158,7 +239,7 @@ public class AdminMenu {
     }
 
     private void viewAllLogs() {
-        List<ActivityLog> logs = activityLogDao.getAllLogs();
+        List<ActivityLog> logs = ctx.activityLogDao().getAllLogs();
         if (logs.isEmpty()) {
             System.out.println("No audit logs recorded yet.");
         } else {
@@ -167,12 +248,12 @@ public class AdminMenu {
     }
 
     private void filterLogsByUser() {
-        int userId = readIntInput("Enter User ID to filter (0 to cancel): ");
+        int userId = InputUtil.readInt(scanner, "Enter User ID to filter (0 to cancel): ");
         if (userId == 0) {
             System.out.println("Filter cancelled.");
             return;
         }
-        List<ActivityLog> logs = activityLogDao.getLogsByUserId(userId);
+        List<ActivityLog> logs = ctx.activityLogDao().getLogsByUserId(userId);
         if (logs.isEmpty()) {
             System.out.println("No logs found for User ID " + userId + ".");
         } else {
@@ -182,7 +263,7 @@ public class AdminMenu {
 
     /** Safe clear: needs the exact word YES; the clearing itself is then written to the new log. */
     private void clearLogs() {
-        int total = activityLogDao.getAllLogs().size();
+        int total = ctx.activityLogDao().getAllLogs().size();
         if (total == 0) {
             System.out.println("There are no logs to clear.");
             return;
@@ -193,19 +274,19 @@ public class AdminMenu {
             System.out.println("Clear cancelled. No logs were deleted.");
             return;
         }
-        int deleted = activityLogDao.clearAllLogs();
+        int deleted = ctx.activityLogDao().clearAllLogs();
         if (deleted < 0) {
             System.out.println("Could not clear logs. Please try again.");
             return;
         }
         System.out.println("SUCCESS: " + deleted + " log entries cleared.");
-        activityLogDao.logAction(currentAdmin.id(), "LOGS_CLEARED",
+        ctx.activityLogDao().logAction(currentAdmin.id(), "LOGS_CLEARED",
                 "Admin " + currentAdmin.id() + " cleared " + deleted + " log entries");
     }
 
     private void printLogTable(List<ActivityLog> logs) {
-        String rowFormat = "%-5s | %-8s | %-18s | %-35s | %-20s%n";
-        String line = "-".repeat(5 + 3 + 8 + 3 + 18 + 3 + DESC_WIDTH + 3 + 20);
+        String rowFormat = "%-5s | %-8s | %-22s | %-35s | %-20s%n";
+        String line = "-".repeat(5 + 3 + 8 + 3 + 22 + 3 + DESC_WIDTH + 3 + 20);
         System.out.println(line);
         System.out.printf(rowFormat, "ID", "User ID", "Action Type", "Description", "Timestamp");
         System.out.println(line);
@@ -251,51 +332,6 @@ public class AdminMenu {
             lines.add("");
         }
         return lines;
-    }
-
-    // ---------- Input validation wrappers ----------
-
-    /** Re-prompts until the user enters a whole number. Never throws on bad input. */
-    private int readIntInput(String prompt) {
-        while (true) {
-            System.out.print(prompt);
-            String line = scanner.nextLine().trim();
-            try {
-                return Integer.parseInt(line);
-            } catch (NumberFormatException e) {
-                System.out.println("Invalid input. Please enter a number.");
-            }
-        }
-    }
-
-    /** Returns a valid role, or null if the admin enters 0 to cancel. */
-    private String readValidRole() {
-        while (true) {
-            System.out.print("Enter new role " + VALID_ROLES + " (0 to cancel): ");
-            String input = scanner.nextLine().trim().toUpperCase();
-            if (input.equals("0")) {
-                return null;
-            }
-            if (VALID_ROLES.contains(input)) {
-                return input;
-            }
-            System.out.println("Invalid role. Choose from: " + VALID_ROLES);
-        }
-    }
-
-    /** Returns a valid status, or null if the admin enters 0 to cancel. */
-    private String readValidStatus() {
-        while (true) {
-            System.out.print("Enter new status " + VALID_STATUSES + " (0 to cancel): ");
-            String input = scanner.nextLine().trim().toUpperCase();
-            if (input.equals("0")) {
-                return null;
-            }
-            if (VALID_STATUSES.contains(input)) {
-                return input;
-            }
-            System.out.println("Invalid status. Choose from: " + VALID_STATUSES);
-        }
     }
 
     // ---------- Formatted console output ----------
